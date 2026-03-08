@@ -131,6 +131,7 @@ pub async fn get_video_sources_details(
                 submission::Column::SelectiveRefreshEnabled,
                 submission::Column::RefreshTtlP5,
                 submission::Column::LastRefreshedAt,
+                submission::Column::Inactive,
             ])
             .into_model::<VideoSourceDetail>()
             .all(&db),
@@ -157,6 +158,7 @@ pub async fn get_video_sources_details(
             selective_refresh_enabled: None,
             refresh_ttl_p5: None,
             last_refreshed_at: None,
+            inactive: None,
             enabled: false,
         })
     }
