@@ -8,8 +8,9 @@ use bili_sync_entity::*;
 use chrono::NaiveDateTime;
 use futures::stream::FuturesUnordered;
 use futures::{Stream, StreamExt, TryStreamExt};
+use sea_orm::ActiveValue::{Set, Unchanged};
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue::Set, ActiveValue::Unchanged, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait};
 use tokio::fs;
 use tokio::sync::Semaphore;
 
@@ -118,7 +119,10 @@ fn submission_refresh_ttl_seconds(submission: &submission::Model) -> Option<i64>
 }
 
 fn should_use_daily_slot_policy(submission: &submission::Model) -> bool {
-    submission.inactive || submission.refresh_ttl_p5.is_some_and(|ttl| ttl > SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS)
+    submission.inactive
+        || submission
+            .refresh_ttl_p5
+            .is_some_and(|ttl| ttl > SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS)
 }
 
 fn stable_daily_slot_offset_seconds(submission_id: i32) -> i64 {
@@ -159,7 +163,8 @@ fn should_skip_submission_refresh(submission: &submission::Model, now: NaiveDate
     if !submission.selective_refresh_enabled {
         return false;
     }
-    let (Some(last_refreshed_at), Some(ttl)) = (submission.last_refreshed_at, submission_refresh_ttl_seconds(submission))
+    let (Some(last_refreshed_at), Some(ttl)) =
+        (submission.last_refreshed_at, submission_refresh_ttl_seconds(submission))
     else {
         return false;
     };
