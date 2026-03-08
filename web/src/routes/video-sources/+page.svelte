@@ -63,7 +63,8 @@
 		path: '',
 		enabled: false,
 		rule: null as Rule | null,
-		useDynamicApi: null as boolean | null
+		useDynamicApi: null as boolean | null,
+		selectiveRefreshEnabled: null as boolean | null
 	};
 
 	// 表单数据
@@ -102,6 +103,7 @@
 			path: source.path,
 			enabled: source.enabled,
 			useDynamicApi: source.useDynamicApi,
+			selectiveRefreshEnabled: source.selectiveRefreshEnabled,
 			rule: source.rule
 		};
 		showEditDialog = true;
@@ -134,7 +136,8 @@
 				path: editForm.path,
 				enabled: editForm.enabled,
 				rule: editForm.rule,
-				useDynamicApi: editForm.useDynamicApi
+				useDynamicApi: editForm.useDynamicApi,
+				selectiveRefreshEnabled: editForm.selectiveRefreshEnabled
 			});
 			// 更新本地数据
 			if (videoSourcesData && editingSource) {
@@ -147,6 +150,7 @@
 					enabled: editForm.enabled,
 					rule: editForm.rule,
 					useDynamicApi: editForm.useDynamicApi,
+					selectiveRefreshEnabled: editForm.selectiveRefreshEnabled,
 					ruleDisplay: response.data.ruleDisplay
 				};
 				videoSourcesData = { ...videoSourcesData };
@@ -367,9 +371,16 @@
 														class="flex w-fit items-center gap-1.5 bg-emerald-700 text-emerald-100"
 													>
 														<CircleCheckBigIcon class="h-3 w-3" />
-														已启用{#if key === 'submissions' && source.useDynamicApi !== null}{source.useDynamicApi
-																? '（动态 API）'
-																: ''}{/if}
+														已启用
+														{#if key === 'submissions' && source.useDynamicApi}
+															（动态 API）
+														{/if}
+														{#if key === 'submissions' && source.selectiveRefreshEnabled}
+															（选择性刷新）
+														{/if}
+														{#if key === 'submissions' && source.inactive}
+															（非活跃）
+														{/if}
 													</Badge>
 												{:else}
 													<Badge class="flex w-fit items-center gap-1.5 bg-rose-700 text-rose-100 ">
@@ -513,6 +524,59 @@
 							</Tooltip.Root>
 						</div>
 					</div>
+				{/if}
+
+				{#if editingType === 'submissions' && editForm.selectiveRefreshEnabled !== null}
+					<div class="flex items-center space-x-2">
+						<Switch bind:checked={editForm.selectiveRefreshEnabled} />
+						<div class="flex items-center gap-1">
+							<Label class="text-sm font-medium">启用选择性刷新</Label>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+								</Tooltip.Trigger>
+								<Tooltip.Content>
+									<p class="text-xs">
+										启用后会根据历史投稿间隔自动计算刷新 TTL，只有超过 TTL 才会重新扫描该投稿源。<br
+										/>
+										TTL 使用 P5（下 5 分位，值下方约有 5% 的历史间隔）。
+									</p>
+								</Tooltip.Content>
+							</Tooltip.Root>
+						</div>
+					</div>
+					{#if editingSource?.refreshTtlP5 !== null}
+						<div class="text-muted-foreground rounded-md border px-3 py-2 text-xs">
+							当前 TTL 统计：P5 {editingSource?.refreshTtlP5 ?? '-'} 秒， 上次刷新 {editingSource?.lastRefreshedAt ??
+								'未记录'}
+						</div>
+					{/if}
+					<div class="text-muted-foreground rounded-md border px-3 py-2 text-xs">
+						当前刷新策略：
+						{#if editingSource?.inactive}
+							每日分片（非活跃，固定 24 小时）
+						{:else if editingSource?.refreshTtlP5 !== null && editingSource.refreshTtlP5 > 86400}
+							每日分片（P5 超过 24 小时，至少每日刷新 1 次）
+						{:else}
+							固定 TTL（按 P5）
+						{/if}
+					</div>
+					{#if editingSource?.inactive !== null}
+						<div class="text-muted-foreground flex items-center gap-1 text-xs">
+							当前状态：{editingSource?.inactive ? '非活跃' : '活跃'}
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<InfoIcon class="h-3.5 w-3.5" />
+								</Tooltip.Trigger>
+								<Tooltip.Content>
+									<p class="text-xs">
+										非活跃表示最近 30 天未检测到新视频。处于非活跃状态时，会忽略 P5，固定按 24
+										小时间隔刷新。
+									</p>
+								</Tooltip.Content>
+							</Tooltip.Root>
+						</div>
+					{/if}
 				{/if}
 
 				<!-- 规则编辑器 -->

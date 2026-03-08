@@ -1,14 +1,16 @@
 use std::collections::HashSet;
+use std::num::Wrapping;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use anyhow::{Context, Result, anyhow, bail};
 use bili_sync_entity::*;
+use chrono::NaiveDateTime;
 use futures::stream::FuturesUnordered;
 use futures::{Stream, StreamExt, TryStreamExt};
-use sea_orm::ActiveValue::Set;
-use sea_orm::TransactionTrait;
+use sea_orm::ActiveValue::{Set, Unchanged};
 use sea_orm::entity::prelude::*;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait};
 use tokio::fs;
 use tokio::sync::Semaphore;
 
@@ -27,6 +29,9 @@ use crate::utils::nfo::{NFO, ToNFO};
 use crate::utils::rule::FieldEvaluatable;
 use crate::utils::status::{PageStatus, STATUS_OK, VideoStatus};
 
+const SUBMISSION_INACTIVE_DAYS: i64 = 30;
+const SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS: i64 = 24 * 60 * 60;
+
 /// 完整地处理某个视频来源
 pub async fn process_video_source(
     video_source: VideoSourceEnum,
@@ -37,12 +42,64 @@ pub async fn process_video_source(
 ) -> Result<()> {
     // 预创建视频源目录，提前检测目录是否可写
     video_source.create_dir_all().await?;
-    // 从参数中获取视频列表的 Model 与视频流
-    let (video_source, video_streams) = video_source
-        .refresh(bili_client, &config.credential, connection)
-        .await?;
-    // 从视频流中获取新视频的简要信息，写入数据库
-    refresh_video_source(&video_source, video_streams, connection).await?;
+    let video_source = match video_source {
+        VideoSourceEnum::Submission(submission_model) => {
+            let now = chrono::Utc::now().naive_utc();
+            if should_skip_submission_refresh(&submission_model, now) {
+                let ttl = submission_refresh_ttl_seconds(&submission_model).unwrap_or_default();
+                let elapsed = submission_model
+                    .last_refreshed_at
+                    .map(|last| (now - last).num_seconds().max(0))
+                    .unwrap_or_default();
+                if submission_model.inactive {
+                    let offset = stable_daily_slot_offset_seconds(submission_model.id);
+                    let next_slot = next_daily_slot_time(submission_model.id, now);
+                    let remaining = (next_slot - now).num_seconds().max(0);
+                    info!(
+                        "跳过投稿「{}」本轮扫描（每日分片-非活跃：日内偏移 {} 秒，下次刷新剩余 {} 秒）",
+                        submission_model.upper_name, offset, remaining
+                    );
+                } else {
+                    let policy = if submission_model
+                        .refresh_ttl_p5
+                        .is_some_and(|ttl| ttl > SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS)
+                    {
+                        "每日分片-P5>24h"
+                    } else if should_use_daily_slot_policy(&submission_model) {
+                        "每日分片"
+                    } else {
+                        "固定 TTL"
+                    };
+                    info!(
+                        "跳过投稿「{}」本轮扫描（{}：已过 {} 秒 / TTL {} 秒）",
+                        submission_model.upper_name, policy, elapsed, ttl
+                    );
+                }
+                VideoSourceEnum::Submission(submission_model)
+            } else {
+                // 从参数中获取视频列表的 Model 与视频流
+                let (video_source, video_streams) = VideoSourceEnum::Submission(submission_model)
+                    .refresh(bili_client, &config.credential, connection)
+                    .await?;
+                // 从视频流中获取新视频的简要信息，写入数据库
+                let detected_new_videos = refresh_video_source(&video_source, video_streams, connection).await?;
+                if let VideoSourceEnum::Submission(submission_model) = &video_source {
+                    update_submission_refresh_metadata(submission_model.id, now, detected_new_videos, connection)
+                        .await?;
+                }
+                video_source
+            }
+        }
+        _ => {
+            // 从参数中获取视频列表的 Model 与视频流
+            let (video_source, video_streams) = video_source
+                .refresh(bili_client, &config.credential, connection)
+                .await?;
+            // 从视频流中获取新视频的简要信息，写入数据库
+            let _ = refresh_video_source(&video_source, video_streams, connection).await?;
+            video_source
+        }
+    };
     // 单独请求视频详情接口，获取视频的详情信息与所有的分页，写入数据库
     fetch_video_details(bili_client, &video_source, connection, config).await?;
     if ARGS.scan_only {
@@ -54,12 +111,136 @@ pub async fn process_video_source(
     Ok(())
 }
 
+fn submission_refresh_ttl_seconds(submission: &submission::Model) -> Option<i64> {
+    if submission.inactive {
+        return Some(SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS);
+    }
+    submission.refresh_ttl_p5.filter(|ttl| *ttl > 0)
+}
+
+fn should_use_daily_slot_policy(submission: &submission::Model) -> bool {
+    submission.inactive
+        || submission
+            .refresh_ttl_p5
+            .is_some_and(|ttl| ttl > SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS)
+}
+
+fn stable_daily_slot_offset_seconds(submission_id: i32) -> i64 {
+    // splitmix64: 基于 submission_id 生成稳定分布的偏移秒数
+    let mut x = Wrapping(submission_id as u64) + Wrapping(0x9E37_79B9_7F4A_7C15);
+    x ^= x >> 30;
+    x *= Wrapping(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 27;
+    x *= Wrapping(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    (x.0 % SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS as u64) as i64
+}
+
+fn next_daily_slot_time(submission_id: i32, now: NaiveDateTime) -> NaiveDateTime {
+    let day_start = now.date().and_hms_opt(0, 0, 0).expect("valid start of day");
+    let slot_offset = chrono::Duration::seconds(stable_daily_slot_offset_seconds(submission_id));
+    let slot_today = day_start + slot_offset;
+    if now < slot_today {
+        slot_today
+    } else {
+        slot_today + chrono::Duration::days(1)
+    }
+}
+
+fn should_run_in_daily_slot(submission_id: i32, last_refreshed_at: NaiveDateTime, now: NaiveDateTime) -> bool {
+    let day_start = now.date().and_hms_opt(0, 0, 0).expect("valid start of day");
+    let slot_offset = chrono::Duration::seconds(stable_daily_slot_offset_seconds(submission_id));
+    let slot_today = day_start + slot_offset;
+    let boundary = if now >= slot_today {
+        slot_today
+    } else {
+        slot_today - chrono::Duration::days(1)
+    };
+    last_refreshed_at < boundary
+}
+
+fn should_skip_submission_refresh(submission: &submission::Model, now: NaiveDateTime) -> bool {
+    if !submission.selective_refresh_enabled {
+        return false;
+    }
+    let (Some(last_refreshed_at), Some(ttl)) =
+        (submission.last_refreshed_at, submission_refresh_ttl_seconds(submission))
+    else {
+        return false;
+    };
+    if should_use_daily_slot_policy(submission) {
+        return !should_run_in_daily_slot(submission.id, last_refreshed_at, now);
+    }
+    (now - last_refreshed_at).num_seconds() < ttl
+}
+
+async fn update_submission_refresh_metadata(
+    submission_id: i32,
+    refreshed_at: NaiveDateTime,
+    detected_new_videos: usize,
+    connection: &DatabaseConnection,
+) -> Result<()> {
+    let latest_row_at = submission::Entity::find_by_id(submission_id)
+        .select_only()
+        .column(submission::Column::LatestRowAt)
+        .into_tuple::<NaiveDateTime>()
+        .one(connection)
+        .await?
+        .context("submission not found when updating refresh metadata")?;
+
+    let publish_times = video::Entity::find()
+        .select_only()
+        .column(video::Column::Ctime)
+        .filter(video::Column::SubmissionId.eq(submission_id))
+        .order_by_asc(video::Column::Ctime)
+        .into_tuple::<NaiveDateTime>()
+        .all(connection)
+        .await?;
+
+    let mut intervals = Vec::with_capacity(publish_times.len().saturating_sub(1));
+    for pair in publish_times.windows(2) {
+        let delta = (pair[1] - pair[0]).num_seconds();
+        if delta > 0 {
+            intervals.push(delta);
+        }
+    }
+
+    let refresh_ttl_p5 = if intervals.is_empty() {
+        None
+    } else {
+        // P5（下 5 分位）：约有 5% 的历史间隔值低于该值。
+        let mut sorted = intervals;
+        sorted.sort_unstable();
+        let p5_index = ((sorted.len() as f64 * 0.05).ceil() as usize).saturating_sub(1);
+        let p5 = sorted[p5_index];
+        Some(p5.max(1))
+    };
+
+    let inactive = if detected_new_videos > 0 {
+        false
+    } else {
+        refreshed_at - latest_row_at >= chrono::Duration::days(SUBMISSION_INACTIVE_DAYS)
+    };
+
+    submission::ActiveModel {
+        id: Unchanged(submission_id),
+        refresh_ttl_p5: Set(refresh_ttl_p5),
+        last_refreshed_at: Set(Some(refreshed_at)),
+        inactive: Set(inactive),
+        ..Default::default()
+    }
+    .save(connection)
+    .await?;
+
+    Ok(())
+}
+
 /// 请求接口，获取视频列表中所有新添加的视频信息，将其写入数据库
 pub async fn refresh_video_source<'a>(
     video_source: &VideoSourceEnum,
     video_streams: Pin<Box<dyn Stream<Item = Result<VideoInfo>> + 'a + Send>>,
     connection: &DatabaseConnection,
-) -> Result<()> {
+) -> Result<usize> {
     video_source.log_refresh_video_start();
     let latest_row_at = video_source.get_latest_row_at().and_utc();
     let mut max_datetime = latest_row_at;
@@ -107,7 +288,7 @@ pub async fn refresh_video_source<'a>(
             .await?;
     }
     video_source.log_refresh_video_end(count);
-    Ok(())
+    Ok(count)
 }
 
 /// 筛选出所有未获取到全部信息的视频，尝试补充其详细信息
