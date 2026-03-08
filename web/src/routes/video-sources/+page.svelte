@@ -191,15 +191,15 @@
 				const sources = videoSourcesData[
 					editingType as keyof VideoSourcesDetailsResponse
 				] as VideoSourceDetail[];
-					sources[editingIdx] = {
-						...sources[editingIdx],
-						path: editForm.path,
-						enabled: editForm.enabled,
-						rule: editForm.rule,
-						useDynamicApi: editForm.useDynamicApi,
-						selectiveRefreshEnabled: editForm.selectiveRefreshEnabled,
-						ruleDisplay: response.data.ruleDisplay
-					};
+				sources[editingIdx] = {
+					...sources[editingIdx],
+					path: editForm.path,
+					enabled: editForm.enabled,
+					rule: editForm.rule,
+					useDynamicApi: editForm.useDynamicApi,
+					selectiveRefreshEnabled: editForm.selectiveRefreshEnabled,
+					ruleDisplay: response.data.ruleDisplay
+				};
 				videoSourcesData = { ...videoSourcesData };
 			}
 			showEditDialog = false;
@@ -599,7 +599,8 @@
 								</Tooltip.Trigger>
 								<Tooltip.Content>
 									<p class="text-xs">
-										启用后会根据历史投稿间隔自动计算刷新 TTL，只有超过 TTL 才会重新扫描该投稿源。<br />
+										启用后会根据历史投稿间隔自动计算刷新 TTL，只有超过 TTL 才会重新扫描该投稿源。<br
+										/>
 										TTL 使用 P5（下 5 分位，值下方约有 5% 的历史间隔）。
 									</p>
 								</Tooltip.Content>
@@ -608,8 +609,8 @@
 					</div>
 					{#if editingSource?.refreshTtlP5 !== null}
 						<div class="text-muted-foreground rounded-md border px-3 py-2 text-xs">
-							当前 TTL 统计：P5 {editingSource?.refreshTtlP5 ?? '-'} 秒，
-							上次刷新 {editingSource?.lastRefreshedAt ?? '未记录'}
+							当前 TTL 统计：P5 {editingSource?.refreshTtlP5 ?? '-'} 秒， 上次刷新 {editingSource?.lastRefreshedAt ??
+								'未记录'}
 						</div>
 					{/if}
 					<div class="text-muted-foreground rounded-md border px-3 py-2 text-xs">
@@ -631,7 +632,8 @@
 								</Tooltip.Trigger>
 								<Tooltip.Content>
 									<p class="text-xs">
-										非活跃表示最近 30 天未检测到新视频。处于非活跃状态时，会忽略 P5，固定按 24 小时间隔刷新。
+										非活跃表示最近 30 天未检测到新视频。处于非活跃状态时，会忽略 P5，固定按 24
+										小时间隔刷新。
 									</p>
 								</Tooltip.Content>
 							</Tooltip.Root>
