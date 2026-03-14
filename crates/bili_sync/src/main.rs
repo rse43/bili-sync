@@ -2,6 +2,7 @@
 extern crate tracing;
 
 mod adapter;
+mod adaptive_polling;
 mod api;
 mod bilibili;
 mod config;

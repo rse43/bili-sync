@@ -617,7 +617,7 @@
 						当前刷新策略：
 						{#if editingSource?.inactive}
 							每日分片（非活跃，固定 24 小时）
-						{:else if editingSource?.refreshTtlP5 !== null && editingSource.refreshTtlP5 > 86400}
+						{:else if editingSource?.refreshTtlP5 !== null && (editingSource?.refreshTtlP5 ?? 0) > 86400}
 							每日分片（P5 超过 24 小时，至少每日刷新 1 次）
 						{:else}
 							固定 TTL（按 P5）

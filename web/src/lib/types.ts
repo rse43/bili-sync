@@ -306,6 +306,20 @@ export interface ConcurrentLimit {
 	download: ConcurrentDownloadLimit;
 }
 
+export interface AdaptivePolling {
+	enable: boolean;
+	threshold: number;
+	force_check_max_age_minutes: number;
+	min_history_intervals: number;
+	interval_weight: number;
+	time_window_weight: number;
+	burst_window_minutes: number;
+	burst_score_boost: number;
+	forced_beyond_p90_cooldown_minutes: number;
+	histogram_neighbor_hours: number;
+	histogram_neighbor_decay: number;
+}
+
 export interface TelegramNotifier {
 	type: 'telegram';
 	bot_token: string;
@@ -339,6 +353,7 @@ export interface Config {
 	upper_path: string;
 	nfo_time_type: string;
 	concurrent_limit: ConcurrentLimit;
+	adaptive_polling: AdaptivePolling;
 	time_format: string;
 	cdn_sorting: boolean;
 	try_upower_anyway: boolean;
