@@ -116,6 +116,9 @@ impl Config {
         if self.adaptive_polling.forced_beyond_p90_cooldown_minutes < 0 {
             errors.push("自适应轮询 forced_beyond_p90_cooldown_minutes 不能小于 0");
         }
+        if self.adaptive_polling.inactive_days_threshold <= 0 {
+            errors.push("自适应轮询 inactive_days_threshold 必须大于 0");
+        }
         if self.adaptive_polling.interval_weight < 0.0 || self.adaptive_polling.time_window_weight < 0.0 {
             errors.push("自适应轮询权重不能为负数");
         }

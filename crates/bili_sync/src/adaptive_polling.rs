@@ -6,7 +6,6 @@ use chrono::{Datelike, NaiveDateTime, Timelike};
 use crate::config::AdaptivePolling;
 
 const HOUR_OF_WEEK_BUCKETS: usize = 7 * 24;
-
 #[derive(Clone)]
 pub struct UploaderProfile {
     pub median_upload_interval: Option<f64>,
@@ -75,6 +74,19 @@ impl ForcedPollReason {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum CooldownReason {
+    BeyondMedian,
+}
+
+impl CooldownReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CooldownReason::BeyondMedian => "beyond_median_cooldown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct PollDecision {
     pub action: PollAction,
     pub final_score: f64,
@@ -83,6 +95,7 @@ pub struct PollDecision {
     pub elapsed_since_last_upload_minutes: Option<i64>,
     pub elapsed_since_last_check_minutes: Option<i64>,
     pub forced_reason: Option<ForcedPollReason>,
+    pub cooldown_reason: Option<CooldownReason>,
 }
 
 pub fn decide_poll(
@@ -108,6 +121,7 @@ pub fn decide_poll(
         elapsed_since_last_check_minutes,
         profile.p90_upload_interval,
         cfg.forced_beyond_p90_cooldown_minutes,
+        cfg.inactive_days_threshold,
     ) {
         Some(ForcedPollReason::BeyondP90)
     } else {
@@ -123,7 +137,20 @@ pub fn decide_poll(
         cfg,
     );
 
-    let action = if forced_reason.is_some() || final_score >= cfg.threshold {
+    let cooldown_reason = if forced_reason.is_none()
+        && should_apply_beyond_median_cooldown(
+            elapsed_since_last_upload_minutes,
+            elapsed_since_last_check_minutes,
+            profile.median_upload_interval,
+            cfg.forced_beyond_p90_cooldown_minutes,
+            cfg.inactive_days_threshold,
+        ) {
+        Some(CooldownReason::BeyondMedian)
+    } else {
+        None
+    };
+
+    let action = if cooldown_reason.is_none() && (forced_reason.is_some() || final_score >= cfg.threshold) {
         PollAction::Poll
     } else {
         PollAction::Skip
@@ -137,6 +164,7 @@ pub fn decide_poll(
         elapsed_since_last_upload_minutes,
         elapsed_since_last_check_minutes,
         forced_reason,
+        cooldown_reason,
     }
 }
 
@@ -159,10 +187,14 @@ fn should_force_beyond_p90(
     elapsed_since_last_check_minutes: Option<i64>,
     p90_upload_interval: Option<f64>,
     cooldown_minutes: i64,
+    inactive_days_threshold: i64,
 ) -> bool {
     let Some((elapsed_upload, p90)) = elapsed_since_last_upload_minutes.zip(p90_upload_interval) else {
         return false;
     };
+    if elapsed_upload < inactive_days_threshold.saturating_mul(24 * 60) {
+        return false;
+    }
     if (elapsed_upload as f64) < p90 {
         return false;
     }
@@ -170,6 +202,28 @@ fn should_force_beyond_p90(
         return true;
     }
     elapsed_since_last_check_minutes.is_none_or(|elapsed_check| elapsed_check >= cooldown_minutes)
+}
+
+fn should_apply_beyond_median_cooldown(
+    elapsed_since_last_upload_minutes: Option<i64>,
+    elapsed_since_last_check_minutes: Option<i64>,
+    median_upload_interval: Option<f64>,
+    cooldown_minutes: i64,
+    inactive_days_threshold: i64,
+) -> bool {
+    if cooldown_minutes <= 0 {
+        return false;
+    }
+    let Some((elapsed_upload, median)) = elapsed_since_last_upload_minutes.zip(median_upload_interval) else {
+        return false;
+    };
+    if (elapsed_upload as f64) < median {
+        return false;
+    }
+    if elapsed_upload < inactive_days_threshold.saturating_mul(24 * 60) {
+        return false;
+    }
+    elapsed_since_last_check_minutes.is_some_and(|elapsed_check| elapsed_check < cooldown_minutes)
 }
 
 fn interval_score(elapsed_since_last_upload_minutes: Option<i64>, profile: &UploaderProfile) -> f64 {
@@ -259,8 +313,18 @@ struct UploaderMetric {
     check_gap_samples: u64,
 }
 
+#[derive(Default, Clone, Copy)]
+struct CycleMetric {
+    poll_attempts: u64,
+    skipped_checks: u64,
+    forced_polls: u64,
+    uploads_found: u64,
+}
+
 #[derive(Default)]
 struct AdaptiveMetrics {
+    cycle_index: u64,
+    current_cycle: CycleMetric,
     total_poll_attempts: u64,
     total_skipped_checks: u64,
     total_forced_polls: u64,
@@ -270,14 +334,28 @@ struct AdaptiveMetrics {
 
 static ADAPTIVE_METRICS: LazyLock<Mutex<AdaptiveMetrics>> = LazyLock::new(|| Mutex::new(AdaptiveMetrics::default()));
 
+pub fn start_metrics_cycle() -> u64 {
+    let mut metrics = ADAPTIVE_METRICS.lock().expect("adaptive metrics lock poisoned");
+    metrics.cycle_index += 1;
+    metrics.current_cycle = CycleMetric::default();
+    metrics.cycle_index
+}
+
 pub fn record_decision(uploader_id: i32, decision: &PollDecision) {
     let mut metrics = ADAPTIVE_METRICS.lock().expect("adaptive metrics lock poisoned");
     match decision.action {
-        PollAction::Poll => metrics.total_poll_attempts += 1,
-        PollAction::Skip => metrics.total_skipped_checks += 1,
+        PollAction::Poll => {
+            metrics.total_poll_attempts += 1;
+            metrics.current_cycle.poll_attempts += 1;
+        }
+        PollAction::Skip => {
+            metrics.total_skipped_checks += 1;
+            metrics.current_cycle.skipped_checks += 1;
+        }
     }
     if decision.forced_reason.is_some() {
         metrics.total_forced_polls += 1;
+        metrics.current_cycle.forced_polls += 1;
     }
     let uploader_metrics = metrics.by_uploader.entry(uploader_id).or_default();
     match decision.action {
@@ -299,18 +377,67 @@ pub fn record_uploads_found(uploader_id: i32, uploads: usize) {
     }
     let mut metrics = ADAPTIVE_METRICS.lock().expect("adaptive metrics lock poisoned");
     metrics.total_uploads_found += uploads as u64;
+    metrics.current_cycle.uploads_found += uploads as u64;
     let uploader_metrics = metrics.by_uploader.entry(uploader_id).or_default();
     uploader_metrics.uploads_found += uploads as u64;
 }
 
 pub fn log_metrics_snapshot() {
     let metrics = ADAPTIVE_METRICS.lock().expect("adaptive metrics lock poisoned");
+    let cycle_total = metrics.current_cycle.poll_attempts + metrics.current_cycle.skipped_checks;
+    let total = metrics.total_poll_attempts + metrics.total_skipped_checks;
+    let cycle_poll_ratio = if cycle_total == 0 {
+        0.0
+    } else {
+        metrics.current_cycle.poll_attempts as f64 / cycle_total as f64
+    };
+    let total_poll_ratio = if total == 0 {
+        0.0
+    } else {
+        metrics.total_poll_attempts as f64 / total as f64
+    };
+    let cycle_forced_ratio = if metrics.current_cycle.poll_attempts == 0 {
+        0.0
+    } else {
+        metrics.current_cycle.forced_polls as f64 / metrics.current_cycle.poll_attempts as f64
+    };
+    let total_forced_ratio = if metrics.total_poll_attempts == 0 {
+        0.0
+    } else {
+        metrics.total_forced_polls as f64 / metrics.total_poll_attempts as f64
+    };
+    let cycle_uploads_per_poll = if metrics.current_cycle.poll_attempts == 0 {
+        0.0
+    } else {
+        metrics.current_cycle.uploads_found as f64 / metrics.current_cycle.poll_attempts as f64
+    };
+    let total_uploads_per_poll = if metrics.total_poll_attempts == 0 {
+        0.0
+    } else {
+        metrics.total_uploads_found as f64 / metrics.total_poll_attempts as f64
+    };
     info!(
-        "adaptive polling metrics: poll_attempts={}, skipped_checks={}, forced_polls={}, uploads_found={}, uploader_count={}",
+        "adaptive polling current cycle #{}: decisions={} polls={} skips={} poll_ratio={:.1}% forced_polls={} forced_ratio={:.1}% uploads_found={} uploads_per_poll={:.3}",
+        metrics.cycle_index,
+        cycle_total,
+        metrics.current_cycle.poll_attempts,
+        metrics.current_cycle.skipped_checks,
+        cycle_poll_ratio * 100.0,
+        metrics.current_cycle.forced_polls,
+        cycle_forced_ratio * 100.0,
+        metrics.current_cycle.uploads_found,
+        cycle_uploads_per_poll,
+    );
+    info!(
+        "adaptive polling cumulative: decisions={} polls={} skips={} poll_ratio={:.1}% forced_polls={} forced_ratio={:.1}% uploads_found={} uploads_per_poll={:.3} uploader_count={}",
+        total,
         metrics.total_poll_attempts,
         metrics.total_skipped_checks,
+        total_poll_ratio * 100.0,
         metrics.total_forced_polls,
+        total_forced_ratio * 100.0,
         metrics.total_uploads_found,
+        total_uploads_per_poll,
         metrics.by_uploader.len()
     );
 }
