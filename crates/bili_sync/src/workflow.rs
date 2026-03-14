@@ -33,7 +33,6 @@ use crate::utils::notify::notify;
 use crate::utils::rule::FieldEvaluatable;
 use crate::utils::status::{PageStatus, STATUS_OK, VideoStatus};
 
-const SUBMISSION_INACTIVE_DAYS: i64 = 30;
 const SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS: i64 = 24 * 60 * 60;
 
 /// 完整地处理某个视频来源
@@ -60,12 +59,13 @@ pub async fn process_video_source(
                 );
                 record_decision(submission_model.id, &decision);
                 let forced_reason = decision.forced_reason.map(|r| r.as_str()).unwrap_or("none");
+                let cooldown_reason = decision.cooldown_reason.map(|r| r.as_str()).unwrap_or("none");
                 let action = match decision.action {
                     PollAction::Poll => "POLL",
                     PollAction::Skip => "SKIP",
                 };
                 info!(
-                    "投稿轮询决策 uploader_id={} uploader={} now={} action={} final_score={:.3} interval_score={:.3} window_score={:.3} elapsed_since_last_upload_min={} elapsed_since_last_check_min={} forced_reason={} median_min={} p75_min={} p90_min={} history_intervals={}",
+                    "投稿轮询决策 uploader_id={} uploader={} now={} action={} final_score={:.3} interval_score={:.3} window_score={:.3} elapsed_since_last_upload_min={} elapsed_since_last_check_min={} forced_reason={} cooldown_reason={} median_min={} p75_min={} p90_min={} history_intervals={}",
                     submission_model.id,
                     submission_model.upper_name,
                     now,
@@ -80,6 +80,7 @@ pub async fn process_video_source(
                         .elapsed_since_last_check_minutes
                         .map_or_else(|| "none".to_string(), |v| v.to_string()),
                     forced_reason,
+                    cooldown_reason,
                     profile
                         .median_upload_interval
                         .map_or_else(|| "none".to_string(), |v| format!("{:.1}", v)),
@@ -106,9 +107,19 @@ pub async fn process_video_source(
                 // 从视频流中获取新视频的简要信息，写入数据库
                 let detected_new_videos = refresh_video_source(&video_source, video_streams, connection).await?;
                 if let VideoSourceEnum::Submission(submission_model) = &video_source {
-                    update_submission_refresh_metadata(submission_model.id, now, detected_new_videos, connection)
-                        .await?;
+                    update_submission_refresh_metadata(
+                        submission_model.id,
+                        now,
+                        detected_new_videos,
+                        config.adaptive_polling.inactive_days_threshold,
+                        connection,
+                    )
+                    .await?;
                     record_uploads_found(submission_model.id, detected_new_videos);
+                    info!(
+                        "投稿轮询执行结果 uploader_id={} uploader={} detected_new_videos={}",
+                        submission_model.id, submission_model.upper_name, detected_new_videos
+                    );
                 }
                 video_source
             }
@@ -210,6 +221,7 @@ async fn update_submission_refresh_metadata(
     submission_id: i32,
     refreshed_at: NaiveDateTime,
     detected_new_videos: usize,
+    inactive_days_threshold: i64,
     connection: &DatabaseConnection,
 ) -> Result<()> {
     let latest_row_at = submission::Entity::find_by_id(submission_id)
@@ -251,7 +263,7 @@ async fn update_submission_refresh_metadata(
     let inactive = if detected_new_videos > 0 {
         false
     } else {
-        refreshed_at - latest_row_at >= chrono::Duration::days(SUBMISSION_INACTIVE_DAYS)
+        refreshed_at - latest_row_at >= chrono::Duration::days(inactive_days_threshold)
     };
 
     submission::ActiveModel {

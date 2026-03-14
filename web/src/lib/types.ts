@@ -316,6 +316,7 @@ export interface AdaptivePolling {
 	burst_window_minutes: number;
 	burst_score_boost: number;
 	forced_beyond_p90_cooldown_minutes: number;
+	inactive_days_threshold: number;
 	histogram_neighbor_hours: number;
 	histogram_neighbor_decay: number;
 }

@@ -94,6 +94,7 @@ pub struct AdaptivePolling {
     pub burst_window_minutes: i64,
     pub burst_score_boost: f64,
     pub forced_beyond_p90_cooldown_minutes: i64,
+    pub inactive_days_threshold: i64,
     pub histogram_neighbor_hours: u8,
     pub histogram_neighbor_decay: f64,
 }
@@ -110,6 +111,7 @@ impl Default for AdaptivePolling {
             burst_window_minutes: 360,
             burst_score_boost: 0.2,
             forced_beyond_p90_cooldown_minutes: 60,
+            inactive_days_threshold: 30,
             histogram_neighbor_hours: 1,
             histogram_neighbor_decay: 0.5,
         }

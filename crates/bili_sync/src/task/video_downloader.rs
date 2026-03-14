@@ -9,7 +9,7 @@ use tokio::sync::{OnceCell, watch};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::adapter::VideoSource;
-use crate::adaptive_polling::log_metrics_snapshot;
+use crate::adaptive_polling::{log_metrics_snapshot, start_metrics_cycle};
 use crate::bilibili::{self, BiliClient, BiliError};
 use crate::config::{ARGS, Config, TEMPLATE, Trigger, VersionedConfig};
 use crate::utils::model::get_enabled_video_sources;
@@ -354,6 +354,8 @@ async fn download_video(
     if video_sources.is_empty() {
         bail!("没有可用的视频源");
     }
+    let cycle_index = start_metrics_cycle();
+    info!("adaptive polling cycle #{} started", cycle_index);
     for video_source in video_sources {
         let display_name = video_source.display_name();
         if let Err(e) = process_video_source(video_source, &bili_client, connection, &template, config).await {
