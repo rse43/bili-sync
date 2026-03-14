@@ -82,6 +82,40 @@ impl Default for Trigger {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct AdaptivePolling {
+    pub enable: bool,
+    pub threshold: f64,
+    pub force_check_max_age_minutes: i64,
+    pub min_history_intervals: usize,
+    pub interval_weight: f64,
+    pub time_window_weight: f64,
+    pub burst_window_minutes: i64,
+    pub burst_score_boost: f64,
+    pub forced_beyond_p90_cooldown_minutes: i64,
+    pub histogram_neighbor_hours: u8,
+    pub histogram_neighbor_decay: f64,
+}
+
+impl Default for AdaptivePolling {
+    fn default() -> Self {
+        Self {
+            enable: true,
+            threshold: 0.65,
+            force_check_max_age_minutes: 360,
+            min_history_intervals: 5,
+            interval_weight: 0.7,
+            time_window_weight: 0.3,
+            burst_window_minutes: 360,
+            burst_score_boost: 0.2,
+            forced_beyond_p90_cooldown_minutes: 60,
+            histogram_neighbor_hours: 1,
+            histogram_neighbor_decay: 0.5,
+        }
+    }
+}
+
 pub trait PathSafeTemplate {
     fn path_safe_register(&mut self, name: &'static str, template: impl Into<String>) -> Result<()>;
     fn path_safe_render(&self, name: &'static str, data: &serde_json::Value) -> Result<String>;

@@ -15,6 +15,7 @@ use tokio::fs;
 use tokio::sync::Semaphore;
 
 use crate::adapter::{VideoSource, VideoSourceEnum};
+use crate::adaptive_polling::{PollAction, UploaderProfile, decide_poll, record_decision, record_uploads_found};
 use crate::bilibili::{BestStream, BiliClient, BiliError, Dimension, PageInfo, Video, VideoInfo};
 use crate::config::{ARGS, Config, PathSafeTemplate};
 use crate::downloader::Downloader;
@@ -45,36 +46,54 @@ pub async fn process_video_source(
     let video_source = match video_source {
         VideoSourceEnum::Submission(submission_model) => {
             let now = chrono::Utc::now().naive_utc();
-            if should_skip_submission_refresh(&submission_model, now) {
-                let ttl = submission_refresh_ttl_seconds(&submission_model).unwrap_or_default();
-                let elapsed = submission_model
-                    .last_refreshed_at
-                    .map(|last| (now - last).num_seconds().max(0))
-                    .unwrap_or_default();
-                if submission_model.inactive {
-                    let offset = stable_daily_slot_offset_seconds(submission_model.id);
-                    let next_slot = next_daily_slot_time(submission_model.id, now);
-                    let remaining = (next_slot - now).num_seconds().max(0);
-                    info!(
-                        "跳过投稿「{}」本轮扫描（每日分片-非活跃：日内偏移 {} 秒，下次刷新剩余 {} 秒）",
-                        submission_model.upper_name, offset, remaining
-                    );
-                } else {
-                    let policy = if submission_model
-                        .refresh_ttl_p5
-                        .is_some_and(|ttl| ttl > SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS)
-                    {
-                        "每日分片-P5>24h"
-                    } else if should_use_daily_slot_policy(&submission_model) {
-                        "每日分片"
-                    } else {
-                        "固定 TTL"
-                    };
-                    info!(
-                        "跳过投稿「{}」本轮扫描（{}：已过 {} 秒 / TTL {} 秒）",
-                        submission_model.upper_name, policy, elapsed, ttl
-                    );
-                }
+            let should_skip = if submission_model.selective_refresh_enabled && config.adaptive_polling.enable {
+                let profile =
+                    build_submission_profile(submission_model.id, connection, &config.adaptive_polling).await?;
+                let decision = decide_poll(
+                    now,
+                    submission_model.last_refreshed_at,
+                    &profile,
+                    &config.adaptive_polling,
+                );
+                record_decision(submission_model.id, &decision);
+                let forced_reason = decision.forced_reason.map(|r| r.as_str()).unwrap_or("none");
+                let action = match decision.action {
+                    PollAction::Poll => "POLL",
+                    PollAction::Skip => "SKIP",
+                };
+                info!(
+                    "投稿轮询决策 uploader_id={} uploader={} now={} action={} final_score={:.3} interval_score={:.3} window_score={:.3} elapsed_since_last_upload_min={} elapsed_since_last_check_min={} forced_reason={} median_min={} p75_min={} p90_min={} history_intervals={}",
+                    submission_model.id,
+                    submission_model.upper_name,
+                    now,
+                    action,
+                    decision.final_score,
+                    decision.interval_score,
+                    decision.time_window_score,
+                    decision
+                        .elapsed_since_last_upload_minutes
+                        .map_or_else(|| "none".to_string(), |v| v.to_string()),
+                    decision
+                        .elapsed_since_last_check_minutes
+                        .map_or_else(|| "none".to_string(), |v| v.to_string()),
+                    forced_reason,
+                    profile
+                        .median_upload_interval
+                        .map_or_else(|| "none".to_string(), |v| format!("{:.1}", v)),
+                    profile
+                        .p75_upload_interval
+                        .map_or_else(|| "none".to_string(), |v| format!("{:.1}", v)),
+                    profile
+                        .p90_upload_interval
+                        .map_or_else(|| "none".to_string(), |v| format!("{:.1}", v)),
+                    profile.intervals_count,
+                );
+                matches!(decision.action, PollAction::Skip)
+            } else {
+                should_skip_submission_refresh(&submission_model, now)
+            };
+
+            if should_skip {
                 VideoSourceEnum::Submission(submission_model)
             } else {
                 // 从参数中获取视频列表的 Model 与视频流
@@ -86,6 +105,7 @@ pub async fn process_video_source(
                 if let VideoSourceEnum::Submission(submission_model) = &video_source {
                     update_submission_refresh_metadata(submission_model.id, now, detected_new_videos, connection)
                         .await?;
+                    record_uploads_found(submission_model.id, detected_new_videos);
                 }
                 video_source
             }
@@ -136,17 +156,6 @@ fn stable_daily_slot_offset_seconds(submission_id: i32) -> i64 {
     (x.0 % SUBMISSION_INACTIVE_REFRESH_INTERVAL_SECONDS as u64) as i64
 }
 
-fn next_daily_slot_time(submission_id: i32, now: NaiveDateTime) -> NaiveDateTime {
-    let day_start = now.date().and_hms_opt(0, 0, 0).expect("valid start of day");
-    let slot_offset = chrono::Duration::seconds(stable_daily_slot_offset_seconds(submission_id));
-    let slot_today = day_start + slot_offset;
-    if now < slot_today {
-        slot_today
-    } else {
-        slot_today + chrono::Duration::days(1)
-    }
-}
-
 fn should_run_in_daily_slot(submission_id: i32, last_refreshed_at: NaiveDateTime, now: NaiveDateTime) -> bool {
     let day_start = now.date().and_hms_opt(0, 0, 0).expect("valid start of day");
     let slot_offset = chrono::Duration::seconds(stable_daily_slot_offset_seconds(submission_id));
@@ -172,6 +181,22 @@ fn should_skip_submission_refresh(submission: &submission::Model, now: NaiveDate
         return !should_run_in_daily_slot(submission.id, last_refreshed_at, now);
     }
     (now - last_refreshed_at).num_seconds() < ttl
+}
+
+async fn build_submission_profile(
+    submission_id: i32,
+    connection: &DatabaseConnection,
+    config: &crate::config::AdaptivePolling,
+) -> Result<UploaderProfile> {
+    let upload_timestamps = video::Entity::find()
+        .select_only()
+        .column(video::Column::Ctime)
+        .filter(video::Column::SubmissionId.eq(submission_id))
+        .order_by_asc(video::Column::Ctime)
+        .into_tuple::<NaiveDateTime>()
+        .all(connection)
+        .await?;
+    Ok(UploaderProfile::build(&upload_timestamps, config))
 }
 
 async fn update_submission_refresh_metadata(

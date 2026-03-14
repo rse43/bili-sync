@@ -971,6 +971,126 @@
 							</div>
 						</div>
 					</div>
+
+					<Separator />
+					<div class="space-y-4">
+						<div class="mb-2 flex items-center space-x-2">
+							<Switch
+								id="adaptive-polling-enable"
+								bind:checked={formData.adaptive_polling.enable}
+							/>
+							<Label for="adaptive-polling-enable">启用投稿源自适应轮询</Label>
+						</div>
+						<p class="text-muted-foreground text-xs">
+							全局任务按「任务触发条件」执行（可配置间隔或
+							Cron），每个投稿源会基于历史上传行为独立决定本轮是否轮询。
+						</p>
+						<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+							<div class="space-y-2">
+								<Label for="adaptive-threshold">轮询阈值 (0~1)</Label>
+								<Input
+									id="adaptive-threshold"
+									type="number"
+									min="0"
+									max="1"
+									step="0.01"
+									bind:value={formData.adaptive_polling.threshold}
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="adaptive-force-check-max-age">强制检查最大间隔（分钟）</Label>
+								<Input
+									id="adaptive-force-check-max-age"
+									type="number"
+									min="20"
+									bind:value={formData.adaptive_polling.force_check_max_age_minutes}
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="adaptive-min-history">最小历史区间数</Label>
+								<Input
+									id="adaptive-min-history"
+									type="number"
+									min="1"
+									bind:value={formData.adaptive_polling.min_history_intervals}
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="adaptive-burst-window">爆发窗口（分钟）</Label>
+								<Input
+									id="adaptive-burst-window"
+									type="number"
+									min="0"
+									bind:value={formData.adaptive_polling.burst_window_minutes}
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="adaptive-burst-boost">爆发分数加成</Label>
+								<Input
+									id="adaptive-burst-boost"
+									type="number"
+									min="0"
+									max="1"
+									step="0.01"
+									bind:value={formData.adaptive_polling.burst_score_boost}
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="adaptive-p90-cooldown">P90 强制轮询冷却（分钟）</Label>
+								<Input
+									id="adaptive-p90-cooldown"
+									type="number"
+									min="0"
+									bind:value={formData.adaptive_polling.forced_beyond_p90_cooldown_minutes}
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="adaptive-neighbor-hours">直方图平滑邻居小时数</Label>
+								<Input
+									id="adaptive-neighbor-hours"
+									type="number"
+									min="0"
+									max="24"
+									bind:value={formData.adaptive_polling.histogram_neighbor_hours}
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="adaptive-neighbor-decay">平滑衰减系数</Label>
+								<Input
+									id="adaptive-neighbor-decay"
+									type="number"
+									min="0"
+									max="1"
+									step="0.05"
+									bind:value={formData.adaptive_polling.histogram_neighbor_decay}
+								/>
+							</div>
+						</div>
+						<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+							<div class="space-y-2">
+								<Label for="adaptive-interval-weight">区间分数权重</Label>
+								<Input
+									id="adaptive-interval-weight"
+									type="number"
+									min="0"
+									max="1"
+									step="0.01"
+									bind:value={formData.adaptive_polling.interval_weight}
+								/>
+							</div>
+							<div class="space-y-2">
+								<Label for="adaptive-window-weight">时间窗口分数权重</Label>
+								<Input
+									id="adaptive-window-weight"
+									type="number"
+									min="0"
+									max="1"
+									step="0.01"
+									bind:value={formData.adaptive_polling.time_window_weight}
+								/>
+							</div>
+						</div>
+					</div>
 				</Tabs.Content>
 			</Tabs.Root>
 
