@@ -979,7 +979,20 @@
 								id="adaptive-polling-enable"
 								bind:checked={formData.adaptive_polling.enable}
 							/>
-							<Label for="adaptive-polling-enable">启用投稿源自适应轮询</Label>
+							<div class="flex items-center gap-1">
+								<Label for="adaptive-polling-enable">启用投稿源自适应轮询</Label>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+									</Tooltip.Trigger>
+									<Tooltip.Content>
+										<p class="text-xs">
+											开启后，投稿源会按历史行为评分决定 POLL 或
+											SKIP。建议：默认开启，仅在排查问题时临时关闭。
+										</p>
+									</Tooltip.Content>
+								</Tooltip.Root>
+							</div>
 						</div>
 						<p class="text-muted-foreground text-xs">
 							全局任务按「任务触发条件」执行（可配置间隔或
@@ -987,7 +1000,20 @@
 						</p>
 						<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
 							<div class="space-y-2">
-								<Label for="adaptive-threshold">轮询阈值 (0~1)</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-threshold">轮询阈值 (0~1)</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												final_score >= threshold 才会轮询（无强制原因时）。建议：0.55~0.75，默认
+												0.65。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-threshold"
 									type="number"
@@ -998,7 +1024,19 @@
 								/>
 							</div>
 							<div class="space-y-2">
-								<Label for="adaptive-force-check-max-age">强制检查最大间隔（分钟）</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-force-check-max-age">强制检查最大间隔（分钟）</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												超过该时长未检查则强制 POLL，防止长期饿死。建议：180~720，默认 360。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-force-check-max-age"
 									type="number"
@@ -1007,7 +1045,19 @@
 								/>
 							</div>
 							<div class="space-y-2">
-								<Label for="adaptive-min-history">最小历史区间数</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-min-history">最小历史区间数</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												历史区间数低于该值时会偏向强制轮询，避免冷启动误判。建议：5~10，默认 5。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-min-history"
 									type="number"
@@ -1016,7 +1066,19 @@
 								/>
 							</div>
 							<div class="space-y-2">
-								<Label for="adaptive-burst-window">爆发窗口（分钟）</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-burst-window">爆发窗口（分钟）</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												距上次上传在该窗口内时会额外加分，用于捕获连发。建议：360~720，默认 360。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-burst-window"
 									type="number"
@@ -1025,7 +1087,19 @@
 								/>
 							</div>
 							<div class="space-y-2">
-								<Label for="adaptive-burst-boost">爆发分数加成</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-burst-boost">爆发分数加成</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												爆发窗口内追加到 final_score 的固定分值。建议：0.10~0.30，默认 0.20。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-burst-boost"
 									type="number"
@@ -1036,16 +1110,66 @@
 								/>
 							</div>
 							<div class="space-y-2">
-								<Label for="adaptive-p90-cooldown">P90 强制轮询冷却（分钟）</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-p90-cooldown">P90/中位数轮询冷却（分钟）</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												限制同一投稿源在短时间内重复触发 P90 强制轮询；中位数冷却仅对“最近 30
+												天无上传”的投稿源生效。建议：30~240，默认 60。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-p90-cooldown"
 									type="number"
 									min="0"
 									bind:value={formData.adaptive_polling.forced_beyond_p90_cooldown_minutes}
 								/>
+								<p class="text-muted-foreground text-xs">
+									用于限制超过 P90 的强制轮询；中位数冷却仅用于最近 30 天无上传的投稿源。
+								</p>
 							</div>
 							<div class="space-y-2">
-								<Label for="adaptive-neighbor-hours">直方图平滑邻居小时数</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-inactive-days">非活跃判定天数</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												距离上次上传超过该天数后，视为非活跃；用于 inactive 标记以及
+												P90/中位数冷却的生效条件。建议：15~45，默认 30。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
+								<Input
+									id="adaptive-inactive-days"
+									type="number"
+									min="1"
+									bind:value={formData.adaptive_polling.inactive_days_threshold}
+								/>
+							</div>
+							<div class="space-y-2">
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-neighbor-hours">直方图平滑邻居小时数</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												平滑当前小时左右相邻小时的历史活跃度，避免过于尖锐。建议：1~3，默认 1。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-neighbor-hours"
 									type="number"
@@ -1055,7 +1179,19 @@
 								/>
 							</div>
 							<div class="space-y-2">
-								<Label for="adaptive-neighbor-decay">平滑衰减系数</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-neighbor-decay">平滑衰减系数</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												邻居小时对当前小时的影响衰减，越大越平滑。建议：0.3~0.8，默认 0.5。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-neighbor-decay"
 									type="number"
@@ -1068,7 +1204,19 @@
 						</div>
 						<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
 							<div class="space-y-2">
-								<Label for="adaptive-interval-weight">区间分数权重</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-interval-weight">区间分数权重</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												elapsed 与历史间隔（median/p75/p90）信号的权重。建议：0.6~0.85，默认 0.7。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-interval-weight"
 									type="number"
@@ -1079,7 +1227,19 @@
 								/>
 							</div>
 							<div class="space-y-2">
-								<Label for="adaptive-window-weight">时间窗口分数权重</Label>
+								<div class="flex items-center gap-1">
+									<Label for="adaptive-window-weight">时间窗口分数权重</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<InfoIcon class="text-muted-foreground h-3.5 w-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>
+											<p class="text-xs">
+												当前小时（周内 168 桶）活跃度信号的权重。建议：0.15~0.4，默认 0.3。
+											</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
 								<Input
 									id="adaptive-window-weight"
 									type="number"
