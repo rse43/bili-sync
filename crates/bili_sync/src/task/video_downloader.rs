@@ -9,6 +9,7 @@ use tokio::sync::{OnceCell, watch};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::adapter::VideoSource;
+use crate::adaptive_polling::log_metrics_snapshot;
 use crate::bilibili::{self, BiliClient, BiliError};
 use crate::config::{ARGS, Config, TEMPLATE, Trigger, VersionedConfig};
 use crate::utils::model::get_enabled_video_sources;
@@ -369,5 +370,6 @@ async fn download_video(
             }
         }
     }
+    log_metrics_snapshot();
     Ok(())
 }

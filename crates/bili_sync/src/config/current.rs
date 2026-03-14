@@ -14,7 +14,7 @@ use crate::config::default::{
     default_auth_token, default_bind_address, default_collection_path, default_favorite_path, default_submission_path,
     default_time_format,
 };
-use crate::config::item::{ConcurrentLimit, NFOTimeType, SkipOption, Trigger};
+use crate::config::item::{AdaptivePolling, ConcurrentLimit, NFOTimeType, SkipOption, Trigger};
 use crate::notifier::Notifier;
 use crate::utils::model::{load_db_config, save_db_config};
 
@@ -48,6 +48,8 @@ pub struct Config {
     pub upper_path: PathBuf,
     pub nfo_time_type: NFOTimeType,
     pub concurrent_limit: ConcurrentLimit,
+    #[serde(default)]
+    pub adaptive_polling: AdaptivePolling,
     pub time_format: String,
     pub cdn_sorting: bool,
     #[serde(default)]
@@ -105,6 +107,18 @@ impl Config {
                 }
             }
         };
+        if !(0.0..=1.0).contains(&self.adaptive_polling.threshold) {
+            errors.push("自适应轮询阈值 threshold 必须在 0 到 1 之间");
+        }
+        if self.adaptive_polling.force_check_max_age_minutes <= 0 {
+            errors.push("自适应轮询 force_check_max_age_minutes 必须大于 0");
+        }
+        if self.adaptive_polling.forced_beyond_p90_cooldown_minutes < 0 {
+            errors.push("自适应轮询 forced_beyond_p90_cooldown_minutes 不能小于 0");
+        }
+        if self.adaptive_polling.interval_weight < 0.0 || self.adaptive_polling.time_window_weight < 0.0 {
+            errors.push("自适应轮询权重不能为负数");
+        }
         if !errors.is_empty() {
             bail!(errors.into_iter().map(|e| format!("- {}", e)).join("\n"));
         }
@@ -131,6 +145,7 @@ impl Default for Config {
             upper_path: CONFIG_DIR.join("upper_face"),
             nfo_time_type: NFOTimeType::FavTime,
             concurrent_limit: ConcurrentLimit::default(),
+            adaptive_polling: AdaptivePolling::default(),
             time_format: default_time_format(),
             cdn_sorting: false,
             try_upower_anyway: false,
